@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verlosung</title>
+<style>
+  /* ---------- Anzeige (Beamer) – gleiche Darstellung auch in der Vorschau ---------- */
+  .anzeige {
+    container-type: size;
+    background: #000;
+    color: var(--aktuell, #fff);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    text-align: center;
+    font-family: Arial, Helvetica, sans-serif;
+    font-weight: bold;
+    padding: 3cqh 4cqw;
+    box-sizing: border-box;
+  }
+  .anzeige .gross { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+  .anzeige .gross .farbe { font-size: 10cqh; line-height: 1; }
+  .anzeige .gross .nr { font-size: min(55cqh, 32cqw); line-height: 1; }
+  .anzeige .frueher { color: var(--frueher, #e6e19a); display: flex; flex-wrap: wrap; justify-content: center; gap: 1cqh 4cqw; font-size: 7cqh; line-height: 1.1; max-height: 24cqh; overflow: hidden; }
+  .vollbild-hinweis { position: fixed; left: 0; right: 0; bottom: 8px; text-align: center; color: #888; font: 16px sans-serif; }
+  body.anzeige-seite { margin: 0; background: #000; cursor: none; }
+  body.anzeige-seite .anzeige { width: 100vw; height: 100vh; }
+
+  /* ---------- Bediener ---------- */
+  body.bediener { font-family: Arial, Helvetica, sans-serif; margin: 0; background: #f2f2f2; color: #111; }
+  .seite { max-width: 960px; margin: 0 auto; padding: 16px; }
+  h1 { margin: 0 0 12px; font-size: 1.5em; }
+  .oben { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .oben .links { flex: 1; min-width: 320px; }
+  .vorschau { width: 320px; aspect-ratio: 16 / 9; border: 2px solid #888; }
+  .status { font-size: .9em; margin-top: 6px; }
+  .status.ok { color: #0a7a0a; }
+  .status.aus { color: #b00; font-weight: bold; }
+  button { font-size: 1em; padding: 10px 14px; border: 1px solid #666; border-radius: 6px; background: #fff; cursor: pointer; }
+  button:hover { background: #e8e8e8; }
+  .karte { background: #fff; border-radius: 8px; padding: 16px; margin: 12px 0; box-shadow: 0 1px 3px #0003; }
+  #nummer { font-size: 3em; width: 4.2em; padding: 6px 10px; letter-spacing: .1em; }
+  .farbtasten { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .farbtasten button { font-size: 1.4em; padding: 14px 22px; font-weight: bold; }
+  #eintragen { font-size: 1.4em; padding: 14px 22px; margin-left: 10px; font-weight: bold; }
+  .hinweis { margin-top: 10px; min-height: 1.4em; font-weight: bold; }
+  .hinweis.fehler { color: #b00; }
+  .hinweis.ok { color: #0a7a0a; }
+  .warnung { background: #fff3cd; border: 2px solid #e0a800; border-radius: 8px; padding: 12px; margin-top: 12px; }
+  .warnung button { margin-right: 8px; }
+  .hidden { display: none !important; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 6px 8px; border-bottom: 1px solid #ddd; text-align: left; }
+  td.nr { font-size: 1.5em; font-weight: bold; }
+  tr.abgeholt td.nr, tr.abgeholt td.farbe { text-decoration: line-through; color: #888; }
+  tr.aktuell { background: #e7f3e7; }
+  td.aktionen button { padding: 5px 9px; margin-right: 4px; }
+  details summary { cursor: pointer; font-weight: bold; }
+  .einst { display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; align-items: center; margin-top: 12px; }
+  .einst input[type=text], .einst input[type=number] { padding: 5px; }
+  .gefahr { margin-top: 16px; }
+  .gefahr button { color: #b00; border-color: #b00; }
+  .kopf { display: flex; align-items: center; justify-content: space-between; }
+  .kopf h2 { margin: 0; }
+  .kopf button { display: flex; padding: 8px; color: #b00; border-color: #b00; }
+  .kopf button:disabled { color: #aaa; border-color: #ccc; cursor: default; background: #fff; }
+</style>
+</head>
+<body>
+<script>
+"use strict";
+var KEY = "verlosung-state";
+var KEY_LEBEN = "verlosung-anzeige-lebt";
+
+var STANDARD = {
+  einstellungen: {
+    einfarbig: false,
+    farben: ["grün", "blau", "rot", "gelb"],
+    max: 999,
+    stellen: 3,
+    anzahl: 10,
+    farbeAktuell: "#ffffff",
+    farbeFrueher: "#e6e19a"
+  },
+  ziehungen: [] // {id, nr, farbe, abgeholt}, in Reihenfolge der Ziehung
+};
+
+function leseRoh() {
+  try { return localStorage.getItem(KEY) || ""; } catch (e) { return ""; }
+}
+function parse(roh) {
+  var s = JSON.parse(JSON.stringify(STANDARD));
+  try {
+    var d = JSON.parse(roh);
+    if (d && typeof d === "object") {
+      if (d.einstellungen) for (var k in s.einstellungen) if (k in d.einstellungen) s.einstellungen[k] = d.einstellungen[k];
+      if (Array.isArray(d.ziehungen)) s.ziehungen = d.ziehungen;
+    }
+  } catch (e) {}
+  return s;
+}
+
+function h(tag, attrs, kinder) {
+  var el = document.createElement(tag);
+  for (var k in (attrs || {})) {
+    if (k === "text") el.textContent = attrs[k];
+    else if (k.slice(0, 2) === "on") el.addEventListener(k.slice(2), attrs[k]);
+    else el.setAttribute(k, attrs[k]);
+  }
+  (kinder || []).forEach(function (c) { el.appendChild(c); });
+  return el;
+}
+
+// ---------- Anzeige rendern (Beamer und Vorschau) ----------
+function zeigeAn(root, state) {
+  var z = state.ziehungen;
+  var e = state.einstellungen;
+  root.style.setProperty("--aktuell", e.farbeAktuell);
+  root.style.setProperty("--frueher", e.farbeFrueher);
+  root.textContent = "";
+  var gross = h("div", { "class": "gross" });
+  var aktuell = z.length ? z[z.length - 1] : null;
+  if (aktuell && !aktuell.abgeholt) {
+    if (aktuell.farbe) gross.appendChild(h("div", { "class": "farbe", text: aktuell.farbe }));
+    gross.appendChild(h("div", { "class": "nr", text: aktuell.nr }));
+  }
+  var frueher = h("div", { "class": "frueher" });
+  z.slice(0, -1).filter(function (x) { return !x.abgeholt; }).reverse().slice(0, e.anzahl).forEach(function (x) {
+    frueher.appendChild(h("div", { text: (x.farbe ? x.farbe + " " : "") + x.nr }));
+  });
+  root.appendChild(gross);
+  root.appendChild(frueher);
+}
+
+// ---------- Anzeige-Fenster ----------
+function startAnzeige() {
+  document.body.className = "anzeige-seite";
+  var root = h("div", { "class": "anzeige" });
+  document.body.appendChild(root);
+  var zuletzt = null;
+  function aktualisiere() {
+    var roh = leseRoh();
+    if (roh !== zuletzt) { zuletzt = roh; zeigeAn(root, parse(roh)); }
+    try { localStorage.setItem(KEY_LEBEN, String(Date.now())); } catch (e) {}
+  }
+  window.addEventListener("storage", aktualisiere);
+  setInterval(aktualisiere, 1000);
+  aktualisiere();
+
+  // Vollbild braucht eine Eingabe im Fenster selbst; der Hinweis verschwindet, sobald es klappt.
+  var hinweis = h("div", { "class": "vollbild-hinweis", text: "Klicken oder Taste drücken für Vollbild" });
+  document.body.appendChild(hinweis);
+  function vollbild() {
+    if (document.fullscreenElement || !document.documentElement.requestFullscreen) return;
+    document.documentElement.requestFullscreen().catch(function () {});
+  }
+  document.addEventListener("click", vollbild);
+  document.addEventListener("keydown", vollbild);
+  document.addEventListener("fullscreenchange", function () {
+    hinweis.style.display = document.fullscreenElement ? "none" : "";
+  });
+}
+
+// ---------- Bediener-Fenster ----------
+function startBediener() {
+  document.body.className = "bediener";
+  var state = parse(leseRoh());
+  var ausstehend = null; // Eintrag, der auf "Trotzdem eintragen" wartet
+  var bearbeiteId = null;
+
+  function speichern() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { meldung("Speichern im Browser nicht möglich!", "fehler"); }
+    zeichne();
+  }
+  function nextId() {
+    return state.ziehungen.reduce(function (m, x) { return Math.max(m, x.id); }, 0) + 1;
+  }
+  function normiere(text) {
+    text = text.trim();
+    if (!/^\d+$/.test(text)) return null;
+    while (text.length < state.einstellungen.stellen) text = "0" + text;
+    return text;
+  }
+  function probleme(nr, farbe, ausserId) {
+    var p = [];
+    var n = parseInt(nr, 10);
+    if (n < 1 || n > state.einstellungen.max) p.push("Die Nummer " + nr + " liegt außerhalb von 1–" + state.einstellungen.max + ".");
+    if (state.ziehungen.some(function (x) { return x.id !== ausserId && x.nr === nr && x.farbe === farbe; }))
+      p.push((farbe ? farbe + " " : "") + nr + " wurde schon gezogen.");
+    return p;
+  }
+
+  // Aufbau
+  var statusEl = h("div", { "class": "status" });
+  var vorschau = h("div", { "class": "anzeige vorschau" });
+  var nummer = h("input", { id: "nummer", type: "text", inputmode: "numeric", autocomplete: "off", maxlength: "6", placeholder: "007" });
+  var tasten = h("div", { "class": "farbtasten" });
+  var eintragen = h("button", { id: "eintragen", text: "Eintragen" });
+  var hinweis = h("div", { "class": "hinweis" });
+  var warnung = h("div", { "class": "warnung hidden" });
+  var tabelle = h("table");
+  var einstellungen = h("div");
+  var leeren = h("button", { title: "Alle Lose löschen", "aria-label": "Alle Lose löschen", onclick: function () {
+    var n = state.ziehungen.length;
+    if (!n || !confirm("Alle " + n + " gezogenen Lose löschen? Das kann nicht rückgängig gemacht werden.")) return;
+    state.ziehungen = []; bearbeiteId = null; speichern();
+  } });
+  leeren.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5"/></svg>';
+
+  document.body.appendChild(h("div", { "class": "seite" }, [
+    h("h1", { text: "Verlosung" }),
+    h("div", { "class": "oben" }, [
+      h("div", { "class": "links" }, [
+        h("button", { text: "Anzeige öffnen (Beamer)", onclick: function () {
+          var w = window.open(location.href.split("?")[0].split("#")[0] + "?anzeige", "verlosung-anzeige", "popup,width=1280,height=720");
+          if (w) w.focus();
+        } }),
+        statusEl
+      ]),
+      vorschau
+    ]),
+    h("div", { "class": "karte" }, [
+      h("label", { "for": "nummer", text: "Losnummer: " }), nummer, eintragen,
+      tasten, hinweis, warnung
+    ]),
+    h("div", { "class": "karte" }, [
+      h("div", { "class": "kopf" }, [h("h2", { text: "Gezogene Lose" }), leeren]),
+      tabelle
+    ]),
+    h("div", { "class": "karte" }, [h("details", {}, [h("summary", { text: "Einstellungen" }), einstellungen])])
+  ]));
+
+  function meldung(text, art) {
+    hinweis.textContent = text;
+    hinweis.className = "hinweis " + (art || "");
+  }
+
+  function eintrag(nr, farbe) {
+    state.ziehungen.push({ id: nextId(), nr: nr, farbe: farbe, abgeholt: false });
+    ausstehend = null;
+    warnung.className = "warnung hidden";
+    nummer.value = "";
+    meldung("✓ " + (farbe ? farbe + " " : "") + nr + " eingetragen", "ok");
+    speichern();
+    nummer.focus();
+  }
+
+  function versuche(farbe) {
+    var nr = normiere(nummer.value);
+    if (nr === null) { meldung("Bitte erst eine Losnummer eingeben (nur Ziffern).", "fehler"); nummer.focus(); return; }
+    var p = probleme(nr, farbe, null);
+    if (!p.length) return eintrag(nr, farbe);
+    ausstehend = { nr: nr, farbe: farbe };
+    warnung.className = "warnung";
+    warnung.textContent = "";
+    p.forEach(function (t) { warnung.appendChild(h("div", { text: "⚠ " + t })); });
+    warnung.appendChild(h("div", { style: "margin-top:8px" }, [
+      h("button", { text: "Trotzdem eintragen", onclick: function () { eintrag(ausstehend.nr, ausstehend.farbe); } }),
+      h("button", { text: "Abbrechen", onclick: function () { ausstehend = null; warnung.className = "warnung hidden"; nummer.focus(); } })
+    ]));
+  }
+
+  nummer.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Enter") return;
+    if (state.einstellungen.einfarbig) versuche("");
+    else meldung("Bitte unten die Farbe antippen.", "fehler");
+  });
+  eintragen.addEventListener("click", function () { versuche(""); });
+
+  function zeichneTasten() {
+    var einfarbig = state.einstellungen.einfarbig;
+    eintragen.className = einfarbig ? "" : "hidden";
+    tasten.textContent = "";
+    if (einfarbig) return;
+    state.einstellungen.farben.forEach(function (f) {
+      tasten.appendChild(h("button", { text: f, onclick: function () { versuche(f); } }));
+    });
+    tasten.appendChild(h("button", { text: "Ohne Farbe", onclick: function () { versuche(""); } }));
+  }
+
+  function zeichneTabelle() {
+    tabelle.textContent = "";
+    var z = state.ziehungen;
+    tabelle.appendChild(h("tr", {}, ["Nr.", "Farbe", "Status", ""].map(function (t) { return h("th", { text: t }); })));
+    if (!z.length) tabelle.appendChild(h("tr", {}, [h("td", { colspan: "4", text: "Noch nichts gezogen." })]));
+    z.slice().reverse().forEach(function (x, i) {
+      var cls = (x.abgeholt ? "abgeholt " : "") + (i === 0 ? "aktuell" : "");
+      if (x.id === bearbeiteId) return tabelle.appendChild(bearbeitenZeile(x));
+      tabelle.appendChild(h("tr", { "class": cls }, [
+        h("td", { "class": "nr", text: x.nr }),
+        h("td", { "class": "farbe", text: x.farbe }),
+        h("td", { text: x.abgeholt ? "abgeholt" : (i === 0 ? "aktuell" : "") }),
+        h("td", { "class": "aktionen" }, [
+          h("button", { text: "Bearbeiten", onclick: function () { bearbeiteId = x.id; zeichne(); } }),
+          h("button", { text: x.abgeholt ? "Wieder aktiv" : "Abgeholt", onclick: function () { x.abgeholt = !x.abgeholt; speichern(); } }),
+          h("button", { text: "Löschen", onclick: function () {
+            if (confirm((x.farbe ? x.farbe + " " : "") + x.nr + " wirklich löschen?")) {
+              state.ziehungen = state.ziehungen.filter(function (y) { return y.id !== x.id; });
+              speichern();
+            }
+          } })
+        ])
+      ]));
+    });
+  }
+
+  function bearbeitenZeile(x) {
+    var nr = h("input", { type: "text", inputmode: "numeric", value: x.nr, size: "6", maxlength: "6" });
+    var farbe = h("select");
+    var optionen = [""].concat(state.einstellungen.farben);
+    if (optionen.indexOf(x.farbe) < 0) optionen.push(x.farbe);
+    optionen.forEach(function (f) {
+      var o = h("option", { value: f, text: f || "(ohne Farbe)" });
+      if (f === x.farbe) o.selected = true;
+      farbe.appendChild(o);
+    });
+    return h("tr", {}, [
+      h("td", {}, [nr]), h("td", {}, [farbe]), h("td"),
+      h("td", { "class": "aktionen" }, [
+        h("button", { text: "Speichern", onclick: function () {
+          var n = normiere(nr.value);
+          if (n === null) { alert("Nur Ziffern bitte."); return; }
+          var p = probleme(n, farbe.value, x.id);
+          if (p.length && !confirm(p.join("\n") + "\n\nTrotzdem speichern?")) return;
+          x.nr = n; x.farbe = farbe.value; bearbeiteId = null; speichern();
+        } }),
+        h("button", { text: "Abbrechen", onclick: function () { bearbeiteId = null; zeichne(); } })
+      ])
+    ]);
+  }
+
+  function zeichneEinstellungen() {
+    var e = state.einstellungen;
+    einstellungen.textContent = "";
+    var gitter = h("div", { "class": "einst" });
+    einstellungen.appendChild(gitter);
+    function feld(label, input, set) {
+      input.addEventListener("change", function () { set(input); speichern(); });
+      gitter.appendChild(h("label", { text: label }));
+      gitter.appendChild(input);
+    }
+    var cb = h("input", { type: "checkbox" }); cb.checked = e.einfarbig;
+    feld("Einfarbig-Modus (keine Farbtasten)", cb, function (i) { e.einfarbig = i.checked; });
+    feld("Farben (mit Komma getrennt)", h("input", { type: "text", value: e.farben.join(", ") }), function (i) {
+      e.farben = i.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    });
+    feld("Höchste Losnummer", h("input", { type: "number", min: "1", value: e.max }), function (i) { e.max = parseInt(i.value, 10) || 999; });
+    feld("Stellen der Losnummer", h("input", { type: "number", min: "1", max: "6", value: e.stellen }), function (i) { e.stellen = parseInt(i.value, 10) || 3; });
+    feld("Frühere Lose anzeigen", h("input", { type: "number", min: "0", max: "30", value: e.anzahl }), function (i) { e.anzahl = Math.max(0, parseInt(i.value, 10) || 0); });
+    feld("Farbe aktuelle Nummer", h("input", { type: "color", value: e.farbeAktuell }), function (i) { e.farbeAktuell = i.value; });
+    feld("Farbe frühere Nummern", h("input", { type: "color", value: e.farbeFrueher }), function (i) { e.farbeFrueher = i.value; });
+    einstellungen.appendChild(h("div", { "class": "gefahr" }, [
+      h("button", { text: "Alles zurücksetzen", onclick: function () {
+        if (!confirm("Wirklich ALLE gezogenen Lose UND alle Einstellungen zurücksetzen?")) return;
+        if (!confirm("Sicher? Das kann nicht rückgängig gemacht werden.")) return;
+        state = parse(""); bearbeiteId = null; speichern();
+        zeichneEinstellungen();
+      } })
+    ]));
+  }
+
+  function zeichne() {
+    zeichneTasten();
+    leeren.disabled = !state.ziehungen.length;
+    zeichneTabelle();
+    zeigeAn(vorschau, state);
+  }
+
+  function pruefeAnzeige() {
+    var t = 0;
+    try { t = parseInt(localStorage.getItem(KEY_LEBEN), 10) || 0; } catch (e) {}
+    var ok = Date.now() - t < 3500;
+    statusEl.textContent = ok ? "● Anzeige verbunden" : "● Anzeige nicht verbunden";
+    statusEl.className = "status " + (ok ? "ok" : "aus");
+  }
+
+  zeichne();
+  zeichneEinstellungen();
+  pruefeAnzeige();
+  setInterval(pruefeAnzeige, 1000);
+  nummer.focus();
+}
+
+if (/[?&]anzeige\b/.test(location.search)) startAnzeige(); else startBediener();
+</script>
+</body>
+</html>
