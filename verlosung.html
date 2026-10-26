@@ -85,7 +85,8 @@ var STANDARD = {
     farbeAktuell: "#ffffff",
     farbeFrueher: "#e6e19a"
   },
-  ziehungen: [] // {id, nr, farbe, abgeholt}, in Reihenfolge der Ziehung
+  sofort: false, // Checkbox "Sofort abgeholt" neben der Losnummer
+  ziehungen: [] // {id, nr, farbe, abgeholt, sofort}, in Reihenfolge der Ziehung
 };
 
 function leseRoh() {
@@ -98,6 +99,7 @@ function parse(roh) {
     if (d && typeof d === "object") {
       if (d.einstellungen) for (var k in s.einstellungen) if (k in d.einstellungen) s.einstellungen[k] = d.einstellungen[k];
       if (Array.isArray(d.ziehungen)) s.ziehungen = d.ziehungen;
+      s.sofort = d.sofort === true;
     }
   } catch (e) {}
   return s;
@@ -199,6 +201,9 @@ function startBediener() {
   var nummer = h("input", { id: "nummer", type: "text", inputmode: "numeric", autocomplete: "off", maxlength: "6", placeholder: "007" });
   var tasten = h("div", { "class": "farbtasten" });
   var eintragen = h("button", { id: "eintragen", text: "Eintragen" });
+  var sofortBox = h("input", { id: "sofort", type: "checkbox" });
+  sofortBox.checked = state.sofort;
+  sofortBox.addEventListener("change", function () { state.sofort = sofortBox.checked; speichern(); });
   var hinweis = h("div", { "class": "hinweis" });
   var warnung = h("div", { "class": "warnung hidden" });
   var tabelle = h("table");
@@ -224,6 +229,7 @@ function startBediener() {
     ]),
     h("div", { "class": "karte" }, [
       h("label", { "for": "nummer", text: "Losnummer: " }), nummer, eintragen,
+      h("label", { "for": "sofort", style: "margin-left:12px" }, [sofortBox, document.createTextNode(" Sofort abgeholt")]),
       tasten, hinweis, warnung
     ]),
     h("div", { "class": "karte" }, [
@@ -238,8 +244,10 @@ function startBediener() {
     hinweis.className = "hinweis " + (art || "");
   }
 
-  function eintrag(nr, farbe) {
-    state.ziehungen.push({ id: nextId(), nr: nr, farbe: farbe, abgeholt: false });
+  function eintrag(nr, farbe, sofort) {
+    var vorher = state.ziehungen[state.ziehungen.length - 1];
+    if (vorher && vorher.sofort) { vorher.abgeholt = true; vorher.sofort = false; }
+    state.ziehungen.push({ id: nextId(), nr: nr, farbe: farbe, abgeholt: false, sofort: !!sofort });
     ausstehend = null;
     warnung.className = "warnung hidden";
     nummer.value = "";
@@ -252,13 +260,13 @@ function startBediener() {
     var nr = normiere(nummer.value);
     if (nr === null) { meldung("Bitte erst eine Losnummer eingeben (nur Ziffern).", "fehler"); nummer.focus(); return; }
     var p = probleme(nr, farbe, null);
-    if (!p.length) return eintrag(nr, farbe);
+    if (!p.length) return eintrag(nr, farbe, sofortBox.checked);
     ausstehend = { nr: nr, farbe: farbe };
     warnung.className = "warnung";
     warnung.textContent = "";
     p.forEach(function (t) { warnung.appendChild(h("div", { text: "⚠ " + t })); });
     warnung.appendChild(h("div", { style: "margin-top:8px" }, [
-      h("button", { text: "Trotzdem eintragen", onclick: function () { eintrag(ausstehend.nr, ausstehend.farbe); } }),
+      h("button", { text: "Trotzdem eintragen", onclick: function () { eintrag(ausstehend.nr, ausstehend.farbe, sofortBox.checked); } }),
       h("button", { text: "Abbrechen", onclick: function () { ausstehend = null; warnung.className = "warnung hidden"; nummer.focus(); } })
     ]));
   }
@@ -292,7 +300,7 @@ function startBediener() {
       tabelle.appendChild(h("tr", { "class": cls }, [
         h("td", { "class": "nr", text: x.nr }),
         h("td", { "class": "farbe", text: x.farbe }),
-        h("td", { text: x.abgeholt ? "abgeholt" : (i === 0 ? "aktuell" : "") }),
+        h("td", { text: x.abgeholt ? "abgeholt" : (i === 0 ? (x.sofort ? "aktuell (sofort abgeholt)" : "aktuell") : "") }),
         h("td", { "class": "aktionen" }, [
           h("button", { text: "Bearbeiten", onclick: function () { bearbeiteId = x.id; zeichne(); } }),
           h("button", { text: x.abgeholt ? "Wieder aktiv" : "Abgeholt", onclick: function () { x.abgeholt = !x.abgeholt; speichern(); } }),
@@ -356,7 +364,7 @@ function startBediener() {
       h("button", { text: "Alles zurücksetzen", onclick: function () {
         if (!confirm("Wirklich ALLE gezogenen Lose UND alle Einstellungen zurücksetzen?")) return;
         if (!confirm("Sicher? Das kann nicht rückgängig gemacht werden.")) return;
-        state = parse(""); bearbeiteId = null; speichern();
+        state = parse(""); bearbeiteId = null; sofortBox.checked = state.sofort; speichern();
         zeichneEinstellungen();
       } })
     ]));

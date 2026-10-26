@@ -31,6 +31,10 @@ _Avoid_: Historie, alte Nummern
 A Los whose prize has been collected. Its Ziehung disappears from the Anzeige but stays in the Bediener's list and can be restored.
 _Avoid_: Gelöscht (that is a real deletion, for typos)
 
+**Sofort abgeholt**:
+A mark set when entering a Ziehung whose winner takes the prize right away. The Los stays the aktuelle Ziehung as usual; when the next Ziehung displaces it, it becomes Abgeholt instead of moving to Frühere Ziehungen.
+_Avoid_: Direkt weg, Sofort-Los
+
 **Bediener**:
 The person who enters Ziehungen in the form.
 _Avoid_: Admin, User
