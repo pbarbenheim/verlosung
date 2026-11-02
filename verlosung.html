@@ -61,6 +61,10 @@
   details summary { cursor: pointer; font-weight: bold; }
   .einst { display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; align-items: center; margin-top: 12px; }
   .einst input[type=text], .einst input[type=number] { padding: 5px; }
+  fieldset.sperrbar { border: 0; padding: 0; margin: 0; min-width: 0; }
+  fieldset.sperrbar:disabled { opacity: .55; }
+  .sperre { margin-top: 12px; padding: 10px; background: #f6f6f6; border-radius: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .sperre input { padding: 6px; }
   .gefahr { margin-top: 16px; }
   .gefahr button { color: #b00; border-color: #b00; }
   .kopf { display: flex; align-items: center; justify-content: space-between; }
@@ -85,6 +89,7 @@ var STANDARD = {
     farbeAktuell: "#ffffff",
     farbeFrueher: "#e6e19a"
   },
+  sperre: "", // Hash des Einstellungs-Passworts, leer = nicht gesperrt
   sofort: false, // Checkbox "Sofort abgeholt" neben der Losnummer
   ziehungen: [] // {id, nr, farbe, abgeholt, sofort}, in Reihenfolge der Ziehung
 };
@@ -100,9 +105,23 @@ function parse(roh) {
       if (d.einstellungen) for (var k in s.einstellungen) if (k in d.einstellungen) s.einstellungen[k] = d.einstellungen[k];
       if (Array.isArray(d.ziehungen)) s.ziehungen = d.ziehungen;
       s.sofort = d.sofort === true;
+      s.sperre = typeof d.sperre === "string" ? d.sperre : "";
     }
   } catch (e) {}
   return s;
+}
+
+// Schützt nur vor versehentlichen Änderungen, nicht vor Absicht (siehe Issue #1): einfacher 53-Bit-Hash.
+function hashePasswort(text) {
+  var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
 function h(tag, attrs, kinder) {
@@ -343,8 +362,30 @@ function startBediener() {
   function zeichneEinstellungen() {
     var e = state.einstellungen;
     einstellungen.textContent = "";
+    var gesperrt = !!state.sperre;
+    var pw = h("input", { type: "password", autocomplete: "new-password", placeholder: gesperrt ? "Passwort" : "Neues Passwort" });
+    var sperrZeile = h("div", { "class": "sperre" });
+    if (gesperrt) {
+      sperrZeile.appendChild(h("span", { text: "🔒 Einstellungen sind gesperrt." }));
+      sperrZeile.appendChild(pw);
+      sperrZeile.appendChild(h("button", { text: "Entsperren", onclick: function () {
+        if (hashePasswort(pw.value) !== state.sperre) { alert("Falsches Passwort."); pw.select(); return; }
+        state.sperre = ""; speichern(); zeichneEinstellungen();
+      } }));
+    } else {
+      sperrZeile.appendChild(h("span", { text: "Einstellungen mit Passwort sperren:" }));
+      sperrZeile.appendChild(pw);
+      sperrZeile.appendChild(h("button", { text: "Sperren", onclick: function () {
+        if (!pw.value) { alert("Bitte ein Passwort eingeben."); pw.focus(); return; }
+        state.sperre = hashePasswort(pw.value); speichern(); zeichneEinstellungen();
+      } }));
+    }
+    einstellungen.appendChild(sperrZeile);
+    var feldsatz = h("fieldset", { "class": "sperrbar" });
+    if (gesperrt) feldsatz.disabled = true;
+    einstellungen.appendChild(feldsatz);
     var gitter = h("div", { "class": "einst" });
-    einstellungen.appendChild(gitter);
+    feldsatz.appendChild(gitter);
     function feld(label, input, set) {
       input.addEventListener("change", function () { set(input); speichern(); });
       gitter.appendChild(h("label", { text: label }));
@@ -360,7 +401,7 @@ function startBediener() {
     feld("Frühere Lose anzeigen", h("input", { type: "number", min: "0", max: "30", value: e.anzahl }), function (i) { e.anzahl = Math.max(0, parseInt(i.value, 10) || 0); });
     feld("Farbe aktuelle Nummer", h("input", { type: "color", value: e.farbeAktuell }), function (i) { e.farbeAktuell = i.value; });
     feld("Farbe frühere Nummern", h("input", { type: "color", value: e.farbeFrueher }), function (i) { e.farbeFrueher = i.value; });
-    einstellungen.appendChild(h("div", { "class": "gefahr" }, [
+    feldsatz.appendChild(h("div", { "class": "gefahr" }, [
       h("button", { text: "Alles zurücksetzen", onclick: function () {
         if (!confirm("Wirklich ALLE gezogenen Lose UND alle Einstellungen zurücksetzen?")) return;
         if (!confirm("Sicher? Das kann nicht rückgängig gemacht werden.")) return;
